@@ -296,4 +296,4 @@ bunx tsc --noEmit
 
 ## 许可
 
-[MIT](LICENSE) © 2026 yuhao，与 `package.json` 的 `license` 字段一致。
+[MIT](LICENSE) © 2026 AndreasByrsting，与 `package.json` 的 `license` 字段一致。

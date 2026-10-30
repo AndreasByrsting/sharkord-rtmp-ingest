@@ -296,4 +296,4 @@ The plan and phase breakdown live in [`docs/rtmp-live-plan.md`](docs/rtmp-live-p
 
 ## License
 
-[MIT](LICENSE) © 2026 yuhao, matching the `license` field in `package.json`.
+[MIT](LICENSE) © 2026 AndreasByrsting, matching the `license` field in `package.json`.
