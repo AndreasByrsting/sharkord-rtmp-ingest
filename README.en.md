@@ -294,6 +294,22 @@ Notes:
 
 The plan and phase breakdown live in [`docs/rtmp-live-plan.md`](docs/rtmp-live-plan.md) (Chinese).
 
+## Publishing to the marketplace
+
+The marketplace is a registry file (`plugins.json`) inside [`Sharkord/plugins`](https://github.com/Sharkord/plugins), fetched by every server. Your code stays in your own repository; only metadata goes into the registry.
+
+1. **Cut a GitHub release** tagged `v<version>` with two assets: `<id>-<version>.tar.gz` and `<version>.json`. `bun run publish` does both (needs `GITHUB_TOKEN`; the repository comes from `GITHUB_REPOSITORY` or the `repository` field in `package.json`).
+2. **Open a PR against `Sharkord/plugins`** adding:
+   - `plugins/sharkord-rtmp-live/plugin.json` — `id`/`name`/`description`/`author`/**`logo` (required, publicly reachable image URL)**/`homepage`/`tags`/`categories`/`screenshots`
+   - `plugins/sharkord-rtmp-live/versions/<version>.json` — `version`, `downloadUrl` (the HTTPS release asset), `checksum` (sha256 of the asset), `sdkVersion`, `size`, `timestamp`
+3. CI runs `bun run validate`: missing fields, an `id` that differs from the directory name, or a version that differs from the filename all fail. After the merge the maintainers regenerate `plugins.json` and your plugin shows up everywhere.
+4. You do not set `verified` — it is a hardcoded allowlist in `scripts/statics.ts` of the registry repo. It means the maintainers recognise the publisher, not that the code was audited.
+5. `tags` / `categories` currently allow no values, so leave them empty.
+
+Two hard rules: `sdkVersion` must equal the server's SDK version (2 right now) or the version will not be offered to that server, so re-release after every SDK bump; release assets get scanned through VirusTotal by the maintainers.
+
+None of this is needed for private use — dropping `dist/sharkord-rtmp-live/` into the plugins directory is enough.
+
 ## License
 
 [MIT](LICENSE) © 2026 AndreasByrsting, matching the `license` field in `package.json`.

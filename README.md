@@ -294,6 +294,22 @@ bunx tsc --noEmit
 
 实施计划与阶段拆解见 [`docs/rtmp-live-plan.md`](docs/rtmp-live-plan.md)。
 
+## 发布到插件市场
+
+官方市场就是 [`Sharkord/plugins`](https://github.com/Sharkord/plugins) 仓库里的一份注册表，服务器启动时拉它的 `plugins.json`。插件代码不必住进那个仓库，只有元数据要进去。
+
+1. **先发 GitHub Release**：tag 用 `v<version>`，附件放 `<id>-<version>.tar.gz` 和 `<version>.json` 两个文件。`bun run publish` 一次做完（要 `GITHUB_TOKEN`；仓库地址从 `GITHUB_REPOSITORY` 或 `package.json` 的 `repository` 读）。
+2. **往 `Sharkord/plugins` 提 PR**，加两个文件：
+   - `plugins/sharkord-rtmp-live/plugin.json`：`id`/`name`/`description`/`author`/**`logo`（必填，公网可访问的图片 URL）**/`homepage`/`tags`/`categories`/`screenshots`
+   - `plugins/sharkord-rtmp-live/versions/<version>.json`：`version`、`downloadUrl`（Release 附件的 HTTPS 地址）、`checksum`（附件的 sha256）、`sdkVersion`、`size`、`timestamp`
+3. CI 会跑 `bun run validate`：缺字段、`id` 与目录名不一致、版本号与文件名不一致都会失败。合并后维护者重新生成 `plugins.json`，所有服务器立刻可见。
+4. `verified` 不归你填：它在 `Sharkord/plugins` 的 `scripts/statics.ts` 里写死成白名单，只有维护者认可的作者会被加进去。它代表「认得这个发布者」，不代表代码被审计。
+5. `tags` / `categories` 目前允许的取值都是空数组，只能留空。
+
+两个硬约束：`sdkVersion` 必须等于服务器当前的 SDK 版本（现在是 2），不匹配的版本不会出现在那台服务器的市场里，每次 SDK 升版都要重发；Release 附件会被维护者拿去 VirusTotal 扫描。
+
+只想自己用的话完全不需要这套流程 —— 把 `dist/sharkord-rtmp-live/` 拷进插件目录就行。
+
 ## 许可
 
 [MIT](LICENSE) © 2026 AndreasByrsting，与 `package.json` 的 `license` 字段一致。
