@@ -5,6 +5,7 @@ import {
   VIDEO_PAYLOAD_TYPE,
   VIDEO_SSRC,
   buildFfmpegArgs,
+  probeFfmpeg,
   spawnFfmpeg,
   type TFfmpegHandle,
   type TVideoMode,
@@ -75,6 +76,12 @@ export const startBridge = async (
   options: TBridgeOptions,
 ): Promise<TBridgeHandle> => {
   const { ctx, channelId } = options;
+
+  // Before anything is allocated: a missing binary must not leave a "直播"
+  // stream and two plain transports behind for the viewer to watch collapse.
+  const probe = probeFfmpeg(options.ffmpegBin, ctx.dataPath);
+
+  if (!probe.ok) throw new Error(probe.message);
 
   const router = ctx.voice.getRouter(channelId);
 

@@ -250,10 +250,28 @@ Work down this list; each step halves the search space.
 |---|---|---|
 | No "received push" in the log | Packets never reached the plugin | Push URL, the 1935 mapping, `docker logs \| grep "rtmp connect"` |
 | "Received push" but "no live channel selected" | No channel picked | Plugin settings → Live channel |
+| `Executable not found in $PATH: "ffmpeg"` | The container has no ffmpeg. Nothing to do with a reverse proxy, ports or the encoder | see "No ffmpeg in the container" below |
 | "Starting to publish to channel N" but the browser stays black | Server side is fine, problem is in the browser | next two rows |
 | The card turns into a headphone icon | Video track was removed — usually a dead consumer transport | Search the browser console for `ice failed` |
 | `consumer transport: connection state failed` | ICE cannot connect; almost always `announcedAddress` | Item 1 of "Three things the deployment must get right" |
 | Picture but stuttering or broken | Bitrate or CPU | Lower the bitrate, check the container is not CPU-bound |
+
+**No ffmpeg in the container.** Since 0.2.3 the plugin probes the binary *before* it creates anything, so a missing one fails loudly instead of leaving a card that appears and collapses. The error names all three locations it tried and both ways out:
+
+```bash
+# on the host, assuming ./data is mounted at /data in the container
+curl -LO https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+tar -xf ffmpeg-release-amd64-static.tar.xz
+cp ffmpeg-*-amd64-static/ffmpeg ./data/plugin-data/sharkord-rtmp-live/ffmpeg
+chmod +x ./data/plugin-data/sharkord-rtmp-live/ffmpeg
+docker restart sharkord
+```
+
+The static build must carry libx264 and libopus or it exits with "Unknown encoder". Verify with:
+
+```bash
+docker exec -it sharkord /data/plugin-data/sharkord-rtmp-live/ffmpeg -hide_banner -encoders | grep -E "libx264|libopus"
+```
 
 The two most useful server logs:
 

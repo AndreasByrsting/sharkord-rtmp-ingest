@@ -1,6 +1,6 @@
 {
   "name": "sharkord-rtmp-live",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Sharkord plugin that accepts an RTMP push from OBS or a DJI action camera and publishes it into a voice channel.",
   "module": "src/server/index.ts",
   "type": "module",

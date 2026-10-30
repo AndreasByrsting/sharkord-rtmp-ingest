@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { PluginContext } from "@sharkord/plugin-sdk";
@@ -29,6 +29,9 @@ export type TFfmpegHandle = {
  * Order of preference: the path an admin typed, a binary dropped into the
  * plugin's data folder, then whatever is on PATH.
  */
+export const localFfmpegPath = (dataPath: string): string =>
+  path.join(dataPath, process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
+
 export const resolveFfmpegBin = (
   ctx: PluginContext,
   configured: string,
@@ -37,14 +40,57 @@ export const resolveFfmpegBin = (
 
   if (trimmed) return trimmed;
 
-  const local = path.join(
-    ctx.dataPath,
-    process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
-  );
+  const local = localFfmpegPath(ctx.dataPath);
 
   if (fs.existsSync(local)) return local;
 
   return "ffmpeg";
+};
+
+const originOf = (bin: string, dataPath: string): string => {
+  if (bin === localFfmpegPath(dataPath)) return "插件数据目录";
+  if (bin === "ffmpeg" || bin === "ffmpeg.exe") return "系统 PATH";
+
+  return "设置项「ffmpeg 路径」";
+};
+
+/**
+ * Spawning a missing binary does not throw: the failure arrives later as an
+ * async 'error' event, and by then the mediasoup transports and the "直播"
+ * stream already exist — the viewer watches an empty card collapse, while the
+ * log only says `Executable not found in $PATH`. Probe first instead.
+ */
+export const probeFfmpeg = (
+  bin: string,
+  dataPath: string,
+): { ok: true } | { ok: false; message: string } => {
+  const result = spawnSync(bin, ["-version"], {
+    stdio: "ignore",
+    timeout: 10_000,
+    windowsHide: true,
+  });
+
+  if (!result.error && result.status === 0) return { ok: true };
+
+  const local = localFfmpegPath(dataPath);
+  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  const reason = result.error
+    ? code === "ENOENT"
+      ? `找不到可执行文件 "${bin}"`
+      : result.error.message
+    : `"${bin}" 退出码 ${result.status ?? "unknown"}`;
+
+  // The container image ships without ffmpeg, so this is the common case and
+  // the message has to say what to do, not just what failed.
+  return {
+    ok: false,
+    message: [
+      `${reason}，直播无法开始。`,
+      `解析到：${bin}（${originOf(bin, dataPath)}）；插件数据目录：${local}${fs.existsSync(local) ? "" : "（不存在）"}`,
+      `容器默认不带 ffmpeg：把静态版二进制放成 ${local} 并 chmod +x，或在设置里填容器内绝对路径，然后重启容器。`,
+      "静态版需要自带 libx264 与 libopus（ffmpeg -encoders 可查）。",
+    ].join("\n"),
+  };
 };
 
 const videoArgs = (mode: TVideoMode, bitrateKbps: number): string[] =>
@@ -149,21 +195,32 @@ export const spawnFfmpeg = (options: TSpawnOptions): TFfmpegHandle => {
   });
 
   let tail = "";
+  let finished = false;
+
+  // 'error' and 'exit' both fire for a binary that could not be started, and
+  // the caller treats every callback as "the stream is over".
+  const finish = (code: number): void => {
+    if (finished) return;
+
+    finished = true;
+
+    options.onExit(code);
+  };
 
   child.stderr?.on("data", (chunk: Buffer) => {
     tail = `${tail}${chunk.toString()}`.slice(-STDERR_TAIL);
   });
 
   child.on("error", (error: Error) => {
-    options.onLog(`ffmpeg 无法启动: ${error.message}`);
+    options.onLog(`ffmpeg 无法启动（${options.bin}）: ${error.message}`);
 
-    options.onExit(-1);
+    finish(-1);
   });
 
   child.on("exit", (code: number | null) => {
     if (tail.trim()) options.onLog(tail.trim().split("\n").slice(-4).join(" | "));
 
-    options.onExit(code ?? -1);
+    finish(code ?? -1);
   });
 
   return {

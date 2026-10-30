@@ -6,5 +6,5 @@
   "homepage": "https://github.com/AndreasByrsting/sharkord-rtmp-ingest",
   "logo": "https://cdn.jsdelivr.net/gh/AndreasByrsting/sharkord-rtmp-ingest@0c906b81b853e0d3265ca9412e1f636ec035b660/logo.png",
   "sdkVersion": 2,
-  "version": "0.2.2"
+  "version": "0.2.3"
 }

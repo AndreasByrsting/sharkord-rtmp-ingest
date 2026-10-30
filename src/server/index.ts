@@ -34,6 +34,16 @@ const stateLabel = (status: TLiveStatus): string => {
 };
 
 const onLoad = async (ctx: PluginContext<TPlugin>) => {
+  // The host may run onLoad again on a cached module without unload in
+  // between; without this the previous ffmpeg and mediasoup transports survive.
+  if (session) {
+    ingest?.stop();
+    ingest = undefined;
+
+    await session.dispose();
+    session = undefined;
+  }
+
   const settings = await ctx.settings.register([
     {
       key: "channel",
