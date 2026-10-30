@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    // Environment setup & latest features
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowJs": true,
+
+    // Bundler mode
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    // Best practices
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noPropertyAccessFromIndexSignature": false
+  },
+  // Scope the check to this plugin. Without this, `tsc` also walks the
+  // locally cloned SDK/builder in .repos and reports their errors.
+  "include": ["src", "scripts", "build.ts", "publish.ts"],
+  "exclude": ["node_modules", "dist", ".repos"]
+}

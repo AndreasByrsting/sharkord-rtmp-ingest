@@ -1,0 +1,78 @@
+# --- dependencies ---------------------------------------------------------
+node_modules/
+.bun/
+jspm_packages/
+web_modules/
+
+# --- lockfiles ------------------------------------------------------------
+# bun.lock is the only lockfile this project uses; ignore the others so a stray
+# `npm install` cannot sneak a second one into the repo.
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
+
+# --- build output (bun run build) -----------------------------------------
+dist/
+out/
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# --- local environment ----------------------------------------------------
+# Keep the template, ignore the real thing.
+.env
+.env.*
+!.env.example
+*.local
+
+# --- local clone of the SDK and plugin builder (bun run setup) ------------
+.repos/
+
+# --- runtime artefacts (plugin data, local ffmpeg, sqlite, logs) ----------
+data/
+plugin-data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.pid
+*.pid.lock
+ffmpeg
+ffmpeg.exe
+ffprobe
+ffprobe.exe
+
+# --- caches and coverage --------------------------------------------------
+.cache/
+.eslintcache
+*.tsbuildinfo
+coverage/
+*.lcov
+.turbo/
+
+# --- logs -----------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- editors and operating systems ----------------------------------------
+.vscode/
+.idea/
+.fleet/
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+
+# --- this workspace's own data --------------------------------------------
+.workbuddy/
