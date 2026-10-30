@@ -52,6 +52,8 @@ ffmpeg 与 mediasoup 跑在同一个进程树里，RTP 走 `127.0.0.1`，因此*
 | `src/types.ts` | 服务端与（曾经的）浏览器端之间的契约；现在只剩两条命令的声明 |
 | `src/client/index.ts` | 空模块 —— 打包器要求这个入口存在。插件没有前端 |
 | `build.ts` / `scripts/deploy.ts` | 构建并把产物复制进服务端插件目录 |
+| `icon.svg` / `logo.svg` / `logo.png` | 插件图标。`icon.svg` 是原始标记；`logo.svg`/`logo.png` 是加了白底圆角的版本 —— 原来的黑色描边在 Sharkord 的深色卡片上几乎看不见 |
+| `scripts/registry.ts` | 从构建产物生成官方注册表要的两个文件，输出到 `registry/` |
 | `docs/rtmp-live-plan.md` | 实施计划、阶段拆解、联调记录（含 5 个已修 bug 的排查过程） |
 
 ## 安装
@@ -146,7 +148,7 @@ docker restart sharkord
 
 ### 能不能放进插件市场
 
-现在不能。市场不是导入通道，而是一份固定榜单 —— `packages/shared/src/plugins/marketplace.ts` 里：
+能，但没法直接丢进去。市场不是导入通道，而是一份固定榜单 —— `packages/shared/src/plugins/marketplace.ts` 里：
 
 ```ts
 const MARKETPLACE_REGISTRY_URL =
@@ -155,10 +157,7 @@ const MARKETPLACE_REGISTRY_URL =
 
 客户端渲染列表、服务端执行安装都读这一个地址，没有任何环境变量能覆盖。服务端的安装流程是「按 id + version 查榜单 → 下载 `downloadUrl` → 校验 sha256 → 解包覆盖」，所以既没有「从 URL 安装」，也没有「上传压缩包」。
 
-要上榜，两步（仓库里已经备好工具）：
-
-1. 配好 `GITHUB_TOKEN`、把 `publish.ts` 的 `repo` 改成自己的仓库，跑 `bun run publish`。它会创建 GitHub Release 并上传 `sharkord-rtmp-live-<version>.tar.gz` 与版本 JSON（其中的 `downloadUrl` 要手动回填成资产地址）
-2. 向 `Sharkord/plugins` 仓库的 `plugins.json` 提 PR，加一条记录：`plugin`（id / name / description / author / **logo 必填且是 https 图片** / homepage / tags / verified: false）+ `versions`（version / downloadUrl / checksum / sdkVersion / size / timestamp）
+要上榜的完整步骤见下面的[发布到插件市场](#发布到插件市场)。这里只说清楚一件事：市场里**没有**「从 URL 安装」，也**没有**「上传压缩包」—— 服务端只认榜单里的 `id + version`，下载 `downloadUrl`、校验 sha256、解包覆盖，全部由它自己完成。
 
 `verified` 只有官方能改成 true，第三方一律 false，不影响安装和升级。
 
@@ -299,14 +298,17 @@ bunx tsc --noEmit
 官方市场就是 [`Sharkord/plugins`](https://github.com/Sharkord/plugins) 仓库里的一份注册表，服务器启动时拉它的 `plugins.json`。插件代码不必住进那个仓库，只有元数据要进去。
 
 1. **先发 GitHub Release**：tag 用 `v<version>`，附件放 `<id>-<version>.tar.gz` 和 `<version>.json` 两个文件。`bun run publish` 一次做完（要 `GITHUB_TOKEN`；仓库地址从 `GITHUB_REPOSITORY` 或 `package.json` 的 `repository` 读）。
-2. **往 `Sharkord/plugins` 提 PR**，加两个文件：
-   - `plugins/sharkord-rtmp-live/plugin.json`：`id`/`name`/`description`/`author`/**`logo`（必填，公网可访问的图片 URL）**/`homepage`/`tags`/`categories`/`screenshots`
-   - `plugins/sharkord-rtmp-live/versions/<version>.json`：`version`、`downloadUrl`（Release 附件的 HTTPS 地址）、`checksum`（附件的 sha256）、`sdkVersion`、`size`、`timestamp`
-3. CI 会跑 `bun run validate`：缺字段、`id` 与目录名不一致、版本号与文件名不一致都会失败。合并后维护者重新生成 `plugins.json`，所有服务器立刻可见。
-4. `verified` 不归你填：它在 `Sharkord/plugins` 的 `scripts/statics.ts` 里写死成白名单，只有维护者认可的作者会被加进去。它代表「认得这个发布者」，不代表代码被审计。
-5. `tags` / `categories` 目前允许的取值都是空数组，只能留空。
+2. **生成 PR 要的两个文件**：`bun run registry`（要先 `bun run build`）。它会读 `manifest.json` 和 `dist/<version>.json`，把结果写到 `registry/plugins/sharkord-rtmp-live/`，目录结构与官方仓库一致，可直接拷进去。
+   - `plugin.json`：`id`/`name`/`description`/`author`/**`logo`（必填，公网可访问的图片 URL）**/`homepage`/`tags`/`categories`/`screenshots`
+   - `versions/<version>.json`：`version`、`downloadUrl`（Release 附件的 HTTPS 地址）、`checksum`（附件的 sha256）、`sdkVersion`、`size`、`timestamp`
+3. **往 `Sharkord/plugins` 提 PR**，把 `registry/plugins/sharkord-rtmp-live/` 整个目录放进去。
+4. CI 会跑 `bun run validate`：缺字段、`id` 与目录名不一致、版本号与文件名不一致都会失败。合并后维护者重新生成 `plugins.json`，所有服务器立刻可见。
+5. `verified` 不归你填：它在 `Sharkord/plugins` 的 `scripts/statics.ts` 里写死成白名单，只有维护者认可的作者会被加进去。它代表「认得这个发布者」，不代表代码被审计。
+6. `tags` / `categories` 目前允许的取值都是空数组，只能留空。
 
 两个硬约束：`sdkVersion` 必须等于服务器当前的 SDK 版本（现在是 2），不匹配的版本不会出现在那台服务器的市场里，每次 SDK 升版都要重发；Release 附件会被维护者拿去 VirusTotal 扫描。
+
+`logo` 用的是 jsDelivr 上的固定提交地址（`cdn.jsdelivr.net/gh/<owner>/<repo>@<commit>/logo.png`）—— 换来的是「一次写死、永不失效」，代价是换图标时要连地址一起换。另一个受支持的写法是 GitHub raw，但这台机器上它被代理挡掉了，jsDelivr 反而通。
 
 只想自己用的话完全不需要这套流程 —— 把 `dist/sharkord-rtmp-live/` 拷进插件目录就行。
 

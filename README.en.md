@@ -52,6 +52,8 @@ ffmpeg and mediasoup live in the same process tree and RTP runs over `127.0.0.1`
 | `src/types.ts` | Contract between the server half and the (former) browser half; now just the two commands |
 | `src/client/index.ts` | Empty module — the bundler requires the entry to exist. There is no frontend |
 | `build.ts` / `scripts/deploy.ts` | Build, then copy the output into the server's plugin directory |
+| `icon.svg` / `logo.svg` / `logo.png` | Plugin icon. `icon.svg` is the raw mark; `logo.svg`/`logo.png` add a white rounded plate because the black strokes nearly vanish on Sharkord's dark cards |
+| `scripts/registry.ts` | Turns the build output into the two files the official registry needs, written to `registry/` |
 | `docs/rtmp-live-plan.md` | Plan, phase breakdown and the debugging log (including the five bugs found on real hardware) |
 
 ## Install
@@ -146,7 +148,7 @@ Why no packaging: the host `import()`s an already-flattened `server/index.js` an
 
 ### Can it go into the plugin marketplace
 
-Not right now. The marketplace is not an import channel but a fixed registry — from the host source:
+Yes, but not by dropping it in. The marketplace is not an import channel but a fixed registry — from the host source:
 
 ```ts
 const MARKETPLACE_REGISTRY_URL =
@@ -155,10 +157,7 @@ const MARKETPLACE_REGISTRY_URL =
 
 Both the client's list and the server's install path read that one URL, and no environment variable overrides it. Installing means "look up id + version in the registry → download `downloadUrl` → verify sha256 → extract and swap". There is no install-from-URL and no archive upload.
 
-To get listed, two steps (the tooling here covers the first):
-
-1. Set `GITHUB_TOKEN`, point `repo` in `publish.ts` at your repository, and run `bun run publish`. It creates a GitHub release and uploads `sharkord-rtmp-live-<version>.tar.gz` plus the version JSON (whose `downloadUrl` you fill in afterwards with the asset URL)
-2. Open a PR against `Sharkord/plugins` adding an entry to `plugins.json`: `plugin` (id / name / description / author / **logo, required and an https image** / homepage / tags / verified: false) plus `versions` (version / downloadUrl / checksum / sdkVersion / size / timestamp)
+The full walkthrough is in [Publishing to the marketplace](#publishing-to-the-marketplace) below. The one thing worth stressing here: there is no install-from-URL and no archive upload — the server only knows `id + version`, then downloads `downloadUrl`, verifies the sha256 and swaps the directory itself.
 
 Only the maintainers can set `verified: true`; third-party entries stay `false`, which does not affect installing or updating.
 
@@ -299,14 +298,17 @@ The plan and phase breakdown live in [`docs/rtmp-live-plan.md`](docs/rtmp-live-p
 The marketplace is a registry file (`plugins.json`) inside [`Sharkord/plugins`](https://github.com/Sharkord/plugins), fetched by every server. Your code stays in your own repository; only metadata goes into the registry.
 
 1. **Cut a GitHub release** tagged `v<version>` with two assets: `<id>-<version>.tar.gz` and `<version>.json`. `bun run publish` does both (needs `GITHUB_TOKEN`; the repository comes from `GITHUB_REPOSITORY` or the `repository` field in `package.json`).
-2. **Open a PR against `Sharkord/plugins`** adding:
-   - `plugins/sharkord-rtmp-live/plugin.json` — `id`/`name`/`description`/`author`/**`logo` (required, publicly reachable image URL)**/`homepage`/`tags`/`categories`/`screenshots`
-   - `plugins/sharkord-rtmp-live/versions/<version>.json` — `version`, `downloadUrl` (the HTTPS release asset), `checksum` (sha256 of the asset), `sdkVersion`, `size`, `timestamp`
-3. CI runs `bun run validate`: missing fields, an `id` that differs from the directory name, or a version that differs from the filename all fail. After the merge the maintainers regenerate `plugins.json` and your plugin shows up everywhere.
-4. You do not set `verified` — it is a hardcoded allowlist in `scripts/statics.ts` of the registry repo. It means the maintainers recognise the publisher, not that the code was audited.
-5. `tags` / `categories` currently allow no values, so leave them empty.
+2. **Generate the two PR files** with `bun run registry` (after `bun run build`). It reads `manifest.json` plus `dist/<version>.json` and writes `registry/plugins/sharkord-rtmp-live/`, laid out exactly like the official repo, ready to copy in:
+   - `plugin.json` — `id`/`name`/`description`/`author`/**`logo` (required, publicly reachable image URL)**/`homepage`/`tags`/`categories`/`screenshots`
+   - `versions/<version>.json` — `version`, `downloadUrl` (the HTTPS release asset), `checksum` (sha256 of the asset), `sdkVersion`, `size`, `timestamp`
+3. **Open a PR against `Sharkord/plugins`** and drop that directory in.
+4. CI runs `bun run validate`: missing fields, an `id` that differs from the directory name, or a version that differs from the filename all fail. After the merge the maintainers regenerate `plugins.json` and your plugin shows up everywhere.
+5. You do not set `verified` — it is a hardcoded allowlist in `scripts/statics.ts` of the registry repo. It means the maintainers recognise the publisher, not that the code was audited.
+6. `tags` / `categories` currently allow no values, so leave them empty.
 
 Two hard rules: `sdkVersion` must equal the server's SDK version (2 right now) or the version will not be offered to that server, so re-release after every SDK bump; release assets get scanned through VirusTotal by the maintainers.
+
+`logo` points at a pinned commit on jsDelivr (`cdn.jsdelivr.net/gh/<owner>/<repo>@<commit>/logo.png`): write it once and it never breaks, at the cost of having to change the URL when the icon changes. GitHub raw is the accepted alternative, but it is blocked by the proxy on the machine this was built on while jsDelivr is not.
 
 None of this is needed for private use — dropping `dist/sharkord-rtmp-live/` into the plugins directory is enough.
 
