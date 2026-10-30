@@ -1,0 +1,9 @@
+# Normalise line endings: the server builds and runs on Linux (Docker) even
+# when the repo is edited on Windows, and a stray CRLF breaks shell scripts.
+* text=auto eol=lf
+
+*.tar.gz binary
+*.tgz binary
+*.png binary
+*.jpg binary
+*.ico binary
