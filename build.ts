@@ -7,7 +7,33 @@ import path from "path";
 // server, which is most of the edit-build-reload loop. See .env.example.
 const pluginsPath = (process.env.SHARKORD_PLUGINS_PATH ?? "").trim();
 
-const result = await build({ sdkVersion: PLUGIN_SDK_VERSION });
+const readJson = async (file: string) =>
+  JSON.parse(await fs.readFile(path.resolve(file), "utf-8"));
+
+const pkg = await readJson("package.json");
+const manifest = await readJson("manifest.json");
+
+const repoSlug = (value: unknown): string => {
+  const raw =
+    typeof value === "string" ? value : ((value as { url?: string })?.url ?? "");
+
+  return raw
+    .replace(/^git\+/, "")
+    .replace(/^https?:\/\/(www\.)?github\.com\//, "")
+    .replace(/^git@github\.com:/, "")
+    .replace(/\.git$/, "")
+    .trim();
+};
+
+// The builder defaults downloadUrl to "ADD_DOWNLOAD_URL_HERE", which then has
+// to be patched by hand before every release. Derive it from the repository
+// and version instead, so dist/<version>.json is uploadable as-is.
+const repo = repoSlug(pkg.repository) || repoSlug(pkg.homepage);
+const downloadUrl = repo
+  ? `https://github.com/${repo}/releases/download/v${pkg.version}/${manifest.id}-${pkg.version}.tar.gz`
+  : undefined;
+
+const result = await build({ sdkVersion: PLUGIN_SDK_VERSION, downloadUrl });
 
 console.log(`Build output: ${result.outDir}`);
 console.log(`Archive:      ${result.archivePath}`);
