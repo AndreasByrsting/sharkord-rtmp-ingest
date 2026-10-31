@@ -259,7 +259,7 @@ Work down this list; each step halves the search space.
 **No ffmpeg in the container.** Since 0.2.3 the plugin probes the binary *before* it creates anything, so a missing one fails loudly instead of leaving a card that appears and collapses. The error names all three locations it tried and both ways out:
 
 ```bash
-# on the host, assuming ./data is mounted at /data in the container
+# on the host, assuming ./data is mounted at /home/bun/.config/sharkord in the container
 curl -LO https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
 tar -xf ffmpeg-release-amd64-static.tar.xz
 cp ffmpeg-*-amd64-static/ffmpeg ./data/plugin-data/sharkord-rtmp-live/ffmpeg
@@ -270,7 +270,7 @@ docker restart sharkord
 The static build must carry libx264 and libopus or it exits with "Unknown encoder". Verify with:
 
 ```bash
-docker exec -it sharkord /data/plugin-data/sharkord-rtmp-live/ffmpeg -hide_banner -encoders | grep -E "libx264|libopus"
+docker exec -it sharkord /home/bun/.config/sharkord/plugin-data/sharkord-rtmp-live/ffmpeg -hide_banner -encoders | grep -E "libx264|libopus"
 ```
 
 The two most useful server logs:

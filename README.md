@@ -259,7 +259,7 @@ Action 6 只能通过 **DJI Mimo App** 直播（相机本体没有直播菜单�
 **容器里没有 ffmpeg**：0.2.3 起插件会在建流**之前**先探测一次，失败就直接报错，不会再出现「卡片闪一下就消失」。报错里带着三个解析位置和两个解法，照做即可：
 
 ```bash
-# 宿主机上（假设 ./data 挂进了容器的 /data）
+# 宿主机上（假设 ./data 挂进了容器的 /home/bun/.config/sharkord）
 curl -LO https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
 tar -xf ffmpeg-release-amd64-static.tar.xz
 cp ffmpeg-*-amd64-static/ffmpeg ./data/plugin-data/sharkord-rtmp-live/ffmpeg
@@ -270,7 +270,7 @@ docker restart sharkord
 静态版必须自带 libx264 与 libopus，否则会以「Unknown encoder」退出。确认方式：
 
 ```bash
-docker exec -it sharkord /data/plugin-data/sharkord-rtmp-live/ffmpeg -hide_banner -encoders | grep -E "libx264|libopus"
+docker exec -it sharkord /home/bun/.config/sharkord/plugin-data/sharkord-rtmp-live/ffmpeg -hide_banner -encoders | grep -E "libx264|libopus"
 ```
 
 服务端侧最有用的两条日志：
