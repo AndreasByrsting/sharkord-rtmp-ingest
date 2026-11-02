@@ -10,6 +10,8 @@ Turns a single RTMP push — from a camera, OBS or a phone — into a live strea
 - **No viewers, no transcoding**: with an empty channel the plugin only holds the RTMP session and costs no CPU. A viewer joining starts the stream, everyone leaving stops it — and **the push stays connected**.
 - **Rotatable stream key**: `/live-refresh` invalidates the old address and cuts the running stream immediately.
 - **Just a plugin**: not a service, no extra ports — Sharkord `import()`s it and it reuses the existing voice runtime.
+- **Fully developed using AI**
+<img width="1868" height="897" alt="image" src="https://github.com/user-attachments/assets/0e3d27db-5eb2-4edf-b7dc-f5a12b0a71e0" />
 
 ## How it works
 
