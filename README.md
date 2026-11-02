@@ -10,6 +10,8 @@
 - **没人看就不转码**：频道里没听众时只保持 RTMP 会话，CPU 占用为零；有人进来自动开始，人走光自动停，**推流不断**。
 - **推流码可轮换**：`/live-refresh` 立刻作废旧地址并断开正在进行的推流。
 - **纯插件**：不是独立服务、不额外占端口，被 Sharkord 进程 `import()` 进来，复用现有语音运行时。
+- **纯AI开发**
+<img width="1868" height="897" alt="image" src="https://github.com/user-attachments/assets/6e37438a-d5f3-4baa-85c0-97be2e256524" />
 
 ## 工作原理
 
