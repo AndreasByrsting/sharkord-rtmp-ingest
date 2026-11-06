@@ -169,6 +169,8 @@ docker restart sharkord
 
 ## 发布到插件市场
 
+> 逐步操作（含发 Release 的点击路径、PR 命令、CI 说明）单独写在 [PUBLISHING.md](PUBLISHING.md)。这一节只讲机制，方便排查「为什么市场里没有我的插件」。
+
 官方市场就是 [`Sharkord/plugins`](https://github.com/Sharkord/plugins) 仓库里的一份注册表，服务器启动时拉它的 `plugins.json`：
 
 ```ts
