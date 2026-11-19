@@ -5,6 +5,7 @@ import {
   type UnloadPluginContext,
   type UpgradePluginContext,
 } from "@sharkord/plugin-sdk";
+import fs from "node:fs";
 import type { TLiveStatus, TPlugin } from "../types";
 import {
   buildKeyInfo,
@@ -13,7 +14,13 @@ import {
   rotateKey,
   type TStoredKey,
 } from "./keys";
-import { resolveFfmpegBin, type TVideoMode } from "./ffmpeg";
+import {
+  ffmpegVersion,
+  probeFfmpeg,
+  resolveFfmpegBin,
+  type TVideoMode,
+} from "./ffmpeg";
+import { ffmpegBuildForHost, installFfmpeg, localFfmpegPath } from "./ffmpeg-install";
 import { startIngest, type TIngestHandle } from "./rtmp-server";
 import { LiveSession } from "./session";
 
@@ -98,9 +105,25 @@ const onLoad = async (ctx: PluginContext<TPlugin>) => {
       key: "ffmpegPath",
       name: "ffmpeg 路径",
       description:
-        "留空则依次尝试插件数据目录下的 ffmpeg、系统 PATH 中的 ffmpeg。",
+        "留空则依次尝试插件数据目录下的 ffmpeg、系统 PATH 中的 ffmpeg。填了就只用你填的这个，也不会自动下载。",
       type: "string",
       defaultValue: "",
+    },
+    {
+      key: "autoInstallFfmpeg",
+      name: "自动下载 ffmpeg",
+      description:
+        "启动时若找不到 ffmpeg，就把静态版（约 25–30 MB）下载到插件数据目录并校验 sha256。关掉后只能用 /live-ffmpeg 手动触发或自己放二进制。",
+      type: "boolean",
+      defaultValue: true,
+    },
+    {
+      key: "ffmpegTimeoutMin",
+      name: "ffmpeg 下载超时（分钟）",
+      description:
+        "单次下载的最长等待，默认 10 分钟。超时后自动重试，共 3 次；网速很慢或走代理时可调大（最大 60）。",
+      type: "number",
+      defaultValue: 10,
     },
   ] as const);
 
@@ -134,6 +157,21 @@ const onLoad = async (ctx: PluginContext<TPlugin>) => {
 
   const keyInfo = () => buildKeyInfo(key, host(), callbackPort(), rtmpPort());
 
+  const ffmpegBin = (): string =>
+    resolveFfmpegBin(ctx, settings.get("ffmpegPath"));
+
+  /**
+   * Settings are user input: a typo, a 0 or a negative number must not turn
+   * into "no timeout at all", so anything out of range falls back to 10.
+   */
+  const ffmpegTimeoutMs = (): number => {
+    const raw = Number(settings.get("ffmpegTimeoutMin"));
+    const minutes = Number.isFinite(raw) ? Math.floor(raw) : 0;
+    const safe = minutes >= 1 && minutes <= 60 ? minutes : 10;
+
+    return safe * 60_000;
+  };
+
   const buildConfig = async () => {
     const channelId = settings.get("channel");
     const channel = channelId > 0 ? await ctx.channels.get(channelId) : undefined;
@@ -142,7 +180,7 @@ const onLoad = async (ctx: PluginContext<TPlugin>) => {
       channelId,
       channelName: channel?.name ?? null,
       rtmpPort: rtmpPort(),
-      ffmpegBin: resolveFfmpegBin(ctx, settings.get("ffmpegPath")),
+      ffmpegBin: ffmpegBin(),
       videoMode: settings.get("videoMode") as TVideoMode,
       bitrateKbps: Math.max(200, Math.min(20000, settings.get("videoBitrate"))),
       localInput: `rtmp://127.0.0.1:${rtmpPort()}/live/${key.streamKey}`,
@@ -160,6 +198,44 @@ const onLoad = async (ctx: PluginContext<TPlugin>) => {
   const refreshConfig = async (): Promise<void> => {
     current.updateConfig(await buildConfig());
   };
+
+  const downloadFfmpeg = (reason: string) =>
+    installFfmpeg({
+      dataPath: ctx.dataPath,
+      timeoutMs: ffmpegTimeoutMs(),
+      onLog: (message) => ctx.logger.log(message),
+    }).then(async (result) => {
+      if (result.ok) {
+        // Picking the new binary up is what lets a publish that was already
+        // waiting start by itself instead of asking for a second push.
+        await refreshConfig();
+
+        ctx.logger.log(`ffmpeg 已就绪（${reason}）：${result.path}`);
+      } else {
+        ctx.logger.error(`ffmpeg 下载失败（${reason}）：${result.message}`);
+      }
+
+      return result;
+    });
+
+  /**
+   * Fires once per load, in the background: the first stream would otherwise
+   * stall behind a 30 MB download while OBS sits there pushing into nothing.
+   * A path typed into the settings is a deliberate choice — never install
+   * behind it. A binary that exists but does not run is a different problem,
+   * and re-downloading it on every load would not fix anything.
+   */
+  const autoInstallFfmpeg = async (): Promise<void> => {
+    if (!settings.get("autoInstallFfmpeg")) return;
+    if (settings.get("ffmpegPath").trim()) return;
+    if (!ffmpegBuildForHost()) return;
+    if (fs.existsSync(localFfmpegPath(ctx.dataPath))) return;
+    if (probeFfmpeg(ffmpegBin(), ctx.dataPath).ok) return;
+
+    await downloadFfmpeg("启动时自动安装");
+  };
+
+  void autoInstallFfmpeg();
 
   /**
    * The events below only fire on a transition, so they are not enough on their
@@ -321,6 +397,33 @@ const onLoad = async (ctx: PluginContext<TPlugin>) => {
         "新的推流地址（仅你可见）",
         "旧推流码已作废，正在进行的推流已断开。",
       );
+    },
+  });
+
+  ctx.commands.register({
+    name: "live-ffmpeg",
+    description: "检查 ffmpeg；缺失时自动下载静态版到插件数据目录。",
+    args: [],
+    requires: Permission.MANAGE_PLUGINS,
+    ephemeral: true,
+    executes: async () => {
+      const bin = ffmpegBin();
+      const probe = probeFfmpeg(bin, ctx.dataPath);
+
+      if (probe.ok) {
+        return `ffmpeg 可用：${bin}\n${ffmpegVersion(bin) ?? "（版本未知）"}`;
+      }
+
+      if (!ffmpegBuildForHost()) {
+        return `${probe.message}\n\n当前平台没有预置包，只能手动放置。`;
+      }
+
+      const result = await downloadFfmpeg("/live-ffmpeg");
+
+      // The message already starts with "安装 ffmpeg 失败" plus the FAQ link.
+      if (!result.ok) return result.message;
+
+      return `ffmpeg 已安装：${result.path}\n${ffmpegVersion(result.path) ?? "（版本未知）"}`;
     },
   });
 

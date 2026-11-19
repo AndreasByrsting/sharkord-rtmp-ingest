@@ -47,7 +47,7 @@ ffmpeg 与 mediasoup 在同一个进程树里，RTP 走 `127.0.0.1`，所以**�
 | 项 | 要求 |
 |---|---|
 | Sharkord | 0.0.28（插件 SDK 2）。`sdkVersion` 必须与服务端一致，否则插件不会被加载 |
-| ffmpeg | 需要自带 `libx264` 与 `libopus`，静态构建即可。**官方镜像里没有 ffmpeg**，见下方安装步骤 |
+| ffmpeg | 需要 `libx264` 与 `libopus`。**官方镜像里没有 ffmpeg**，插件会自动下载静态版，也可以自备，见下方第 2 步 |
 | 端口 | `1935/tcp`（推流）、`40000/tcp` + `40000/udp`（Sharkord 的 WebRTC） |
 
 ## 安装
@@ -81,11 +81,29 @@ bun run build
 bun run deploy /path/to/sharkord/plugins   # 也可把路径写进 .env 的 SHARKORD_PLUGINS_PATH
 ```
 
-### 2. 准备 ffmpeg
+### 2. ffmpeg（插件会自己装）
 
-官方镜像 `oven/bun` 里没有 ffmpeg。两个办法，推荐第一个（不用改镜像）：
+官方镜像 `oven/bun` 里没有 ffmpeg，所以插件首次启动时会在**后台**下载一个静态版，写进插件数据目录：
 
-**放到插件数据目录**（插件会优先使用它）：
+| 项 | 说明 |
+|---|---|
+| 放哪 | `data/plugin-data/sharkord-rtmp-live/ffmpeg`（Windows 宿主上是 `ffmpeg.exe`）；`plugin-data` 在升级插件时不会被删 |
+| 多大 | 单个平台的包，macOS ARM 约 19 MB，Linux / Windows 约 25–30 MB |
+| 怎么保证完整性 | 固定 sha256 + 固定字节数，先写临时文件，校验通过才原子改名到目标路径 |
+| 会不会重复下 | 不会。目标文件存在且能执行 `-version` 就直接复用 |
+| 失败会怎样 | 日志里写清原因，并给出对应的手动下载命令；推流不中断，装好后自动开始发布 |
+
+下载是异步的：OBS 可以先推着，装完会自己接上，不需要重新推流。也可以让管理员随时用 `/live-ffmpeg` 检查或手动触发。
+
+**不想让它自己下**，三种替代方式：
+
+| 方式 | 做法 |
+|---|---|
+| 自己放二进制 | 把静态版放到 `data/plugin-data/sharkord-rtmp-live/ffmpeg` 并 `chmod +x`。注意 `plugin-data` 是挂载进容器的，放进去的必须是 **Linux** 版，不能从 Windows 上拖一个 `ffmpeg.exe` |
+| 自建镜像 | `FROM sharkord/sharkord:latest` + `apt-get install -y ffmpeg`，把「ffmpeg 路径」留空（走 PATH）或填 `/usr/bin/ffmpeg` |
+| 关掉自动下载 | 设置里关掉「自动下载 ffmpeg」，之后只能手动 `/live-ffmpeg` 或自己放 |
+
+自己放二进制的完整流程：
 
 ```bash
 curl -LO https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
@@ -95,11 +113,7 @@ cp ffmpeg-*-amd64-static/ffmpeg ./data/plugin-data/sharkord-rtmp-live/ffmpeg
 chmod +x ./data/plugin-data/sharkord-rtmp-live/ffmpeg
 ```
 
-`plugin-data` 是挂载进容器的，所以这个二进制必须是 **Linux** 的（不能在 Windows 上直接下载一个 `ffmpeg.exe` 丢进去）。
-
-**自建镜像**：`FROM sharkord/sharkord:latest` + `apt-get install -y ffmpeg`，然后把「ffmpeg 路径」留空（走 PATH）或填 `/usr/bin/ffmpeg`。
-
-验证二进制可用：
+验证二进制可用（两种放法都适用）：
 
 ```bash
 docker exec -it sharkord /home/bun/.config/sharkord/plugin-data/sharkord-rtmp-live/ffmpeg \
@@ -174,7 +188,9 @@ Action 6 只能通过 **DJI Mimo App** 直播（相机本体没有直播菜单�
 | 对外推流端口 | 推流地址里显示的端口，即宿主机映射出去的那个。填 `0` 表示与监听端口相同 |
 | 视频处理 | `转码`（默认，兼容性好）或 `直通`（省 CPU，仅当源是 H.264 Baseline） |
 | 转码码率 | 默认 2500 kbps。大疆 1080p 源最高 6 Mbps，想更清晰可调到 4000 |
-| ffmpeg 路径 | 留空则依次找插件数据目录下的 ffmpeg、系统 PATH |
+| ffmpeg 路径 | 留空则依次找插件数据目录下的 ffmpeg、系统 PATH。填了就只用填的这个，也不会自动下载 |
+| 自动下载 ffmpeg | 默认开。启动时找不到 ffmpeg 就后台下载静态版；关掉后只能 `/live-ffmpeg` 或自己放 |
+| ffmpeg 下载超时（分钟） | 默认 10，单次下载最长等待。超时自动重试，共 3 次；网速慢可调大（1–60） |
 
 ## 命令与权限
 
@@ -182,12 +198,13 @@ Action 6 只能通过 **DJI Mimo App** 直播（相机本体没有直播菜单�
 |---|---|
 | `/live` | 把当前推流地址（服务器 / 推流码 / 完整地址）+ 当前状态发给执行者 |
 | `/live-refresh` | 换一个新的推流码，立即断开正在进行的推流，返回新地址 |
+| `/live-ffmpeg` | 检查 ffmpeg 是否可用；缺失时立即下载静态版，返回版本横幅 |
 
-两条命令都是临时消息，不写进频道历史。
+三条命令都是临时消息，不写进频道历史。
 
 **谁能用由权限页决定**（服务器设置 → 插件 → 权限）：勾上的角色即可使用，改配置不用改代码。没动过配置时默认跟随 `MANAGE_PLUGINS`，等于只有管理员。
 
-注意宿主还有一道前置权限：**任何插件命令都要求「使用插件」（`USE_PLUGINS`）**。角色缺这个权限时，`/` 菜单里根本不会出现这两条命令。
+注意宿主还有一道前置权限：**任何插件命令都要求「使用插件」（`USE_PLUGINS`）**。角色缺这个权限时，`/` 菜单里根本不会出现这几条命令。
 
 ## 排查
 
@@ -197,13 +214,14 @@ Action 6 只能通过 **DJI Mimo App** 直播（相机本体没有直播菜单�
 |---|---|---|
 | 日志没有「收到推流」 | 包根本没到插件 | 推流端地址、1935 映射、`docker logs \| grep "rtmp connect"` |
 | 有「收到推流」但「还没选择直播频道」 | 设置里频道没选 | 插件设置 → 直播频道 |
-| 出现「找不到可执行文件 "ffmpeg"」 | 容器里没有 ffmpeg，与反代、端口、推流端都无关 | 见上方「准备 ffmpeg」 |
+| 出现「找不到可执行文件 "ffmpeg"」，且日志没有下载记录 | 自动下载被关掉、或平台没有预置包（`process.platform` 不在支持列表） | 见上方第 2 步，或执行 `/live-ffmpeg` |
+| 日志有「ffmpeg 下载中」但停在某个百分比 | 容器出网被限制，或连不上 GitHub | 换代理 / 自己放二进制（第 2 步的表格） |
 | 有「开始向频道 N 发布直播」但浏览器黑屏 | 服务端链路已通，问题在浏览器侧 | 下面两行 |
 | 卡片变耳机图标 | 视频 track 被移除，通常是 consumer transport 挂了 | 浏览器 F12 搜 `ice failed` |
 | `consumer transport: connection state failed` | ICE 连不上，几乎都是 `announcedAddress` | 见上方第 3 步 |
 | 有画面但卡顿 / 花屏 | 码率或 CPU | 调低转码码率，确认容器 CPU 没打满 |
 
-0.2.3 起，ffmpeg 缺失会在建流**之前**就报错，日志里直接写出三个解析位置和两种解法，不会再出现「卡片闪一下就消失」。
+0.2.3 起，ffmpeg 缺失会在建流**之前**就报错，日志里直接写出三个解析位置和可选做法，不会再出现「卡片闪一下就消失」。0.2.4 起不用再手动准备二进制：缺失时插件自己下。
 
 服务端侧最有用的两条日志：
 
@@ -217,7 +235,7 @@ ffmpeg ... -f rtp ...      ← 实际启动的转码命令
 ## 已知限制
 
 - **只支持一路推流。** 已在推流时第二路会被直接拒绝，不会打断第一路。
-- **ffmpeg 要自备。** 插件不会自动下载二进制。
+- **ffmpeg 由插件下载，所以容器要能出网。** 只在 x64 Linux、arm64 Linux、x64 Windows、x64 / arm64 macOS 上有预置地址，其他平台得自己放二进制。
 - **直通模式对源有要求。** Producer 声明的 H.264 参数是 Baseline 3.1；源不匹配时画面可能是黑的，先切回转码模式验证。
 - **无观众超时断流还没做。** 相机一直推、频道一直没人时，RTMP 会话会一直挂着（`gop_cache` 已关闭，不会累积帧缓存）。
 - **插件文案目前只有中文。** 宿主没有按语言查表的接口，`settings.register` / `commands.register` 的文案是注册时写死的单个字符串。

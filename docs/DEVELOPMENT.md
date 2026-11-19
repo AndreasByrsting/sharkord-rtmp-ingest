@@ -41,13 +41,14 @@ SHARKORD_PLUGINS_PATH=D:/sharkord/data/plugins   # 构建后自动部署
 
 | 路径 | 作用 |
 |---|---|
-| `src/server/index.ts` | 插件入口：设置项注册、事件监听、`/live` 与 `/live-refresh` |
+| `src/server/index.ts` | 插件入口：设置项注册、事件监听、`/live`、`/live-refresh`、`/live-ffmpeg` |
 | `src/server/session.ts` | 状态机：把「推流会话」与「频道语音运行时」两个生命周期串起来，所有转换串行化 |
 | `src/server/rtmp-server.ts` | `node-media-server` 封装：路径解析、推流码校验、单路互斥、踢流 |
 | `src/server/bridge.ts` | ffmpeg → RTP → mediasoup PlainTransport ×2 → Producer ×2 → `createStream` |
 | `src/server/ffmpeg.ts` | 参数组装、二进制定位与探测、子进程管理 |
+| `src/server/ffmpeg-install.ts` | 下载静态 ffmpeg：固定 sha256/大小、临时文件 + 原子改名、单飞 |
 | `src/server/keys.ts` | 32 位随机推流码、持久化、轮换、定时安全比较 |
-| `src/types.ts` | 服务端契约；现在只剩两条命令的声明 |
+| `src/types.ts` | 服务端契约；现在只剩三条命令的声明 |
 | `src/client/index.ts` | 空模块——打包器要求这个入口存在。插件没有前端 |
 | `build.ts` | 构建入口，写入 `sdkVersion`、推导 `downloadUrl`、可选部署 |
 | `publish.ts` | 发 GitHub Release（调 plugin-builder 的 `publish`） |
@@ -57,6 +58,7 @@ SHARKORD_PLUGINS_PATH=D:/sharkord/data/plugins   # 构建后自动部署
 | `icon.svg` | 原始图标（透明底，黑色描边） |
 | `logo.svg` / `logo.png` | 白底圆角版本。**市场与 manifest 用的是这个**——原图的黑色描边在 Sharkord 深色卡片上几乎看不见 |
 | `docs/rtmp-live-plan.md` | 实施计划、阶段拆解、联调记录（含已修 bug 的排查过程） |
+| `docs/FAQ.md` | 面向使用者的常见问题。插件报错里的链接指向这里（`FAQ_URL`），改文件名要同步改常量 |
 
 ## 常用命令
 
@@ -77,6 +79,9 @@ bunx tsc --noEmit             # 类型检查
 - **`tsc --noEmit` 会报链接进来的 SDK 自身的错误**（`@sharkord/shared` 反向 import 了 `apps/server` 的类型）。只看 `src`/`scripts`/`build.ts`/`publish.ts` 下的；`tsconfig.json` 已把范围限定好，`src` 下应为 0 错。
 - **`node-media-server` 的 `on()` 挂在模块级单例 emitter 上**，`stop()` 不摘监听。所以每次插件重载都会多一层处理器——`rtmp-server.ts` 用进程级 generation 把旧处理器静音，加新监听时别绕过它。
 - **不要用 `spawn()` 判断二进制是否存在。** 找不到时错误是异步的，此时 mediasoup 的 transport 已经建好，观众会看到一张空卡片塌掉。用 `ffmpeg -version` 先探测（`probeFfmpeg`）。
+- **自动装 ffmpeg 只能解 gzip，不能解 xz。** Bun 的 zlib 没有 xz 解码器，所以只能用 ffmpeg-static 那种「单文件 `.gz`」资产；johnvansickle 上游的 `.tar.xz` 在运行时解不开。
+- **下载有两条硬约束，改的时候别放松**：sha256 与字节数都得对上才 rename 到目标路径；先写 `*.download-<pid>` / `*.unpack-<pid>` 再原子改名，否则中途失败会留下一个半截二进制让 `probeFfmpeg` 之后的行为变得不可解释。
+- **`installFfmpeg` 先看已有二进制。** 目标文件存在且 `-version` 能跑就直接返回——它只在 sha256 通过后才会出现，重复下载纯属浪费。判定逻辑是同步的，正好和单飞 `pending` 串行，别改成先 `await` 再判断。
 - **推流码用定时安全比较**，别直接 `===`。
 
 ## 改完怎么验证
@@ -96,12 +101,13 @@ bunx tsc --noEmit 2>&1 | grep -E "^(src|scripts)/"   # 应无输出
 const mod = await import("file:///.../dist/sharkord-rtmp-live/server/index.js");
 await mod.onLoad(ctx);
 
-// 断言：onLoad/onUnload/onUpgrade 存在；commands 里注册了两条；
+// 断言：onLoad/onUnload/onUpgrade 存在；commands 里注册了三条；
 // /live 的返回值里带着 announcedAddress；/live-refresh 真的换了码；
+// /live-ffmpeg 在二进制已就位时秒回、且不再触发下载；
 // 端口真的 listen 起来；onUnload 之后端口释放、监听摘除
 ```
 
-实测覆盖过的点：两条命令的 ephemeral 标记、`/live` 文案里的服务器地址取自「对外推流域名」、`/live-refresh` 前后码不同、1935 真监听、卸载干净。
+实测覆盖过的点：三条命令的 ephemeral 标记、`/live` 文案里的服务器地址取自「对外推流域名」、`/live-refresh` 前后码不同、`/live-ffmpeg` 复用已有二进制（~100 ms、无下载日志）、1935 真监听、卸载干净。
 
 ### 3. 装进真实服务器
 
@@ -125,7 +131,7 @@ docker restart sharkord
 
 ## 打含 ffmpeg 的整包
 
-给没有 ffmpeg 的服务器用，解压即跑。产物不入库（`dist/` 已忽略）。
+0.2.4 起插件会自己下载 ffmpeg，整包只剩一个用途：**目标机器完全不能出网**，要把二进制一起带过去。产物不入库（`dist/` 已忽略）。
 
 ```bash
 # 1. 拿一个静态 ffmpeg（含 libx264 + libopus）

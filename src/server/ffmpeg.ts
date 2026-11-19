@@ -1,7 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import path from "node:path";
 import type { PluginContext } from "@sharkord/plugin-sdk";
+import {
+  FAQ_URL,
+  ffmpegBuildForHost,
+  ffmpegInstallStatus,
+  localFfmpegPath,
+} from "./ffmpeg-install";
 
 export type TVideoMode = "transcode" | "copy";
 
@@ -29,9 +34,6 @@ export type TFfmpegHandle = {
  * Order of preference: the path an admin typed, a binary dropped into the
  * plugin's data folder, then whatever is on PATH.
  */
-export const localFfmpegPath = (dataPath: string): string =>
-  path.join(dataPath, process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
-
 export const resolveFfmpegBin = (
   ctx: PluginContext,
   configured: string,
@@ -82,15 +84,45 @@ export const probeFfmpeg = (
 
   // The container image ships without ffmpeg, so this is the common case and
   // the message has to say what to do, not just what failed.
-  return {
-    ok: false,
-    message: [
-      `${reason}，直播无法开始。`,
-      `解析到：${bin}（${originOf(bin, dataPath)}）；插件数据目录：${local}${fs.existsSync(local) ? "" : "（不存在）"}`,
-      `容器默认不带 ffmpeg：把静态版二进制放成 ${local} 并 chmod +x，或在设置里填容器内绝对路径，然后重启容器。`,
-      "静态版需要自带 libx264 与 libopus（ffmpeg -encoders 可查）。",
-    ].join("\n"),
-  };
+  const build = ffmpegBuildForHost();
+  const install = ffmpegInstallStatus();
+
+  const lines = [
+    `${reason}，直播无法开始。`,
+    `解析到：${bin}（${originOf(bin, dataPath)}）；插件数据目录：${local}${fs.existsSync(local) ? "" : "（不存在）"}`,
+  ];
+
+  if (install.running) {
+    lines.push(
+      `插件正在自动下载 ffmpeg（${install.stage ?? "准备中"}），下载完成会自动开始，不用重新推流。`,
+    );
+  } else if (build) {
+    lines.push(
+      `可以让插件自己下载：管理员在聊天里执行 /live-ffmpeg（静态版 ${Math.round(build.bytes / 1048576)} MB，校验 sha256 后写入插件数据目录）。`,
+    );
+  } else {
+    lines.push(
+      `当前平台 ${process.platform}-${process.arch} 没有预置的下载地址，需要手动把静态版放到 ${local} 并 chmod +x。`,
+    );
+  }
+
+  lines.push("静态版需要自带 libx264 与 libopus（ffmpeg -encoders 可查）。");
+  lines.push(`排查方法：${FAQ_URL}`);
+
+  return { ok: false, message: lines.join("\n") };
+};
+
+/** First line of `ffmpeg -version`, for support replies. */
+export const ffmpegVersion = (bin: string): string | null => {
+  const result = spawnSync(bin, ["-version"], {
+    encoding: "utf8",
+    timeout: 10_000,
+    windowsHide: true,
+  });
+
+  const first = result.stdout?.split("\n")[0]?.trim();
+
+  return first || null;
 };
 
 const videoArgs = (mode: TVideoMode, bitrateKbps: number): string[] =>

@@ -47,7 +47,7 @@ ffmpeg and mediasoup share the same process tree and the RTP hops over `127.0.0.
 | Item | Requirement |
 |---|---|
 | Sharkord | 0.0.28 (plugin SDK 2). `sdkVersion` must match the server or the plugin is not loaded |
-| ffmpeg | must carry `libx264` and `libopus`; a static build is fine. **The official image ships without ffmpeg** — see the install step |
+| ffmpeg | needs `libx264` and `libopus`. **The official image ships without ffmpeg** — the plugin downloads a static build, or you supply one; see step 2 |
 | Ports | `1935/tcp` (publishing), `40000/tcp` + `40000/udp` (Sharkord's WebRTC) |
 
 ## Installation
@@ -81,11 +81,29 @@ bun run build
 bun run deploy /path/to/sharkord/plugins   # or set SHARKORD_PLUGINS_PATH in .env
 ```
 
-### 2. Provide ffmpeg
+### 2. ffmpeg (the plugin fetches one)
 
-The official `oven/bun` image has no ffmpeg. Two options — the first is recommended because it leaves the image untouched:
+The official `oven/bun` image ships without ffmpeg, so on first load the plugin downloads a static build in the background and writes it into the plugin data folder:
 
-**Drop a static binary into the plugin data folder** (the plugin prefers it):
+| | |
+|---|---|
+| Where | `data/plugin-data/sharkord-rtmp-live/ffmpeg` (`ffmpeg.exe` on a Windows host); `plugin-data` survives plugin upgrades |
+| Size | one platform only — ~19 MB for macOS arm64, 25–30 MB for Linux / Windows |
+| Integrity | pinned sha256 plus exact byte count; written to a temp file and renamed into place only after both match |
+| Repeat downloads | none — an existing binary that answers `-version` is reused as is |
+| On failure | the log names the cause and prints the matching manual command; the stream is not torn down, and publishing starts by itself once ffmpeg is there |
+
+The download is asynchronous: OBS can keep pushing into a server that has no ffmpeg yet, and the picture appears once the install finishes — no second push needed. An admin can also run `/live-ffmpeg` at any time to check or trigger it.
+
+**If you would rather not download**, three alternatives:
+
+| Option | How |
+|---|---|
+| Bring your own binary | Drop a static build at `data/plugin-data/sharkord-rtmp-live/ffmpeg` and `chmod +x` it. `plugin-data` is mounted into the container, so it must be a **Linux** build — a `ffmpeg.exe` from a Windows host will not run |
+| Build your own image | `FROM sharkord/sharkord:latest` plus `apt-get install -y ffmpeg`, then leave the ffmpeg path empty (resolved from PATH) or point it at `/usr/bin/ffmpeg` |
+| Turn the download off | Disable "auto-download ffmpeg" in the settings; after that only `/live-ffmpeg` or a manual binary will do |
+
+The full manual route:
 
 ```bash
 curl -LO https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
@@ -95,11 +113,7 @@ cp ffmpeg-*-amd64-static/ffmpeg ./data/plugin-data/sharkord-rtmp-live/ffmpeg
 chmod +x ./data/plugin-data/sharkord-rtmp-live/ffmpeg
 ```
 
-`plugin-data` is mounted into the container, so the binary must be a **Linux** build — a Windows `ffmpeg.exe` will not run there.
-
-**Or build your own image**: `FROM sharkord/sharkord:latest` plus `apt-get install -y ffmpeg`, then leave the ffmpeg path empty (resolved from PATH) or point it at `/usr/bin/ffmpeg`.
-
-Verify:
+Verify either way:
 
 ```bash
 docker exec -it sharkord /home/bun/.config/sharkord/plugin-data/sharkord-rtmp-live/ffmpeg \
@@ -174,7 +188,9 @@ The Action 6 only streams through the **DJI Mimo app** (the camera has no stream
 | Public publish port | Port shown in the URL, i.e. the host-side mapping. `0` means "same as the listen port" |
 | Video handling | `transcode` (default, best compatibility) or `copy` (cheap, only for H.264 Baseline sources) |
 | Bitrate | 2500 kbps by default. DJI 1080p sources go up to 6 Mbps; 4000 is a reasonable bump |
-| ffmpeg path | Empty resolves to the plugin data folder, then PATH |
+| ffmpeg path | Empty resolves to the plugin data folder, then PATH. A value here is used exclusively and disables the download |
+| Auto-download ffmpeg | On by default: fetch a static build in the background when none is found. Off means `/live-ffmpeg` or a manual binary only |
+| ffmpeg download timeout (min) | 10 by default, the cap per attempt. Timed out downloads are retried, three attempts in total; raise it (1–60) on a slow link |
 
 ## Commands and permissions
 
@@ -182,8 +198,9 @@ The Action 6 only streams through the **DJI Mimo app** (the camera has no stream
 |---|---|
 | `/live` | Sends the current publish URL (server / key / full address) plus the current state |
 | `/live-refresh` | Issues a new key, cuts the running stream, returns the new address |
+| `/live-ffmpeg` | Checks ffmpeg; if missing, downloads the static build right away and reports the version banner |
 
-Both are ephemeral and never land in channel history.
+All three are ephemeral and never land in channel history.
 
 **Who may use them is decided by the permissions page** (Server Settings → Plugins → Permissions): tick a role and it can run them, no config edits needed. Untouched, they follow `MANAGE_PLUGINS`, i.e. admins only.
 
@@ -197,13 +214,14 @@ Work down this list; each row narrows the problem by half:
 |---|---|---|
 | No "received push" in the log | the packets never reach the plugin | publisher URL, 1935 mapping, `docker logs \| grep "rtmp connect"` |
 | "received push" but "no live channel selected" | channel not set | plugin settings → live channel |
-| `找不到可执行文件 "ffmpeg"` | no ffmpeg in the container; unrelated to reverse proxies or the publisher | see "Provide ffmpeg" above |
+| `找不到可执行文件 "ffmpeg"` with no download in the log | auto-download is off, or the platform has no pinned build | see step 2, or run `/live-ffmpeg` |
+| "ffmpeg 下载中" stalls at some percentage | the container cannot egress to GitHub | proxy it, or supply a binary yourself (step 2) |
 | "starting to publish to channel N" but the browser is black | server side is fine, problem is in the browser | next two rows |
 | Card turns into a headphone icon | video track removed — usually a dead consumer transport | search F12 for `ice failed` |
 | `consumer transport: connection state failed` | ICE cannot connect; almost always `announcedAddress` | step 3 above |
 | Picture but stuttering or broken | bitrate or CPU | lower the bitrate, check the container is not CPU-bound |
 
-Since 0.2.3 a missing ffmpeg is detected **before** anything is allocated, and the error names all three locations tried plus both ways out — no more "the card flashes and disappears".
+Since 0.2.3 a missing ffmpeg is detected **before** anything is allocated, and the error names all three locations tried plus both ways out — no more "the card flashes and disappears". Since 0.2.4 you do not have to provide the binary either: the plugin fetches one.
 
 The two most useful server-side lines:
 
@@ -217,7 +235,7 @@ If the first one never appears the browser is not subscribing (wrong channel, mo
 ## Limitations
 
 - **One push at a time.** A second publisher is rejected and does not interrupt the first.
-- **Bring your own ffmpeg.** The plugin never downloads a binary.
+- **ffmpeg comes from a download, so the container needs egress.** Pinned builds exist for x64 Linux, arm64 Linux, x64 Windows and x64 / arm64 macOS only; anything else needs a manual binary.
 - **Passthrough has requirements.** Producers announce H.264 Baseline 3.1; a mismatched source can render black — switch back to transcoding to confirm.
 - **No idle timeout yet.** If the camera keeps pushing with nobody watching, the RTMP session stays up (`gop_cache` is off, so no frame cache accumulates).
 - **UI strings are Chinese only.** The host has no locale lookup for `settings.register` / `commands.register`; the text is fixed at registration time.

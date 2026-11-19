@@ -36,17 +36,19 @@ export type TKeyInfo = {
 export type TNoArgs = Record<string, never>;
 
 /**
- * Two commands, both answering the invoker alone:
+ * Three commands, all answering the invoker alone:
  *
  *   live          the current publish address
  *   live-refresh  a brand new one, and the running stream is cut
+ *   live-ffmpeg   check the binary, downloading it if it is missing
  *
  * No actions and no UI: everything an admin needs is in chat, which keeps the
- * permission page down to those two entries.
+ * permission page down to those three entries.
  */
 export type TPlugin = {
   commands: {
     live: { args: TNoArgs; response: string };
     "live-refresh": { args: TNoArgs; response: string };
+    "live-ffmpeg": { args: TNoArgs; response: string };
   };
 };
