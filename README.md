@@ -46,7 +46,6 @@ ffmpeg 与 mediasoup 在同一个进程树里，RTP 走 `127.0.0.1`，所以**�
 
 | 项 | 要求 |
 |---|---|
-| Sharkord | 0.0.28（插件 SDK 2）。`sdkVersion` 必须与服务端一致，否则插件不会被加载 |
 | ffmpeg | 需要 `libx264` 与 `libopus`。**官方镜像里没有 ffmpeg**，插件会自动下载静态版，也可以自备，见下方第 2 步 |
 | 端口 | `1935/tcp`（推流）、`40000/tcp` + `40000/udp`（Sharkord 的 WebRTC） |
 

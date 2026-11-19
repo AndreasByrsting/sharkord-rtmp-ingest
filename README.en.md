@@ -46,7 +46,6 @@ ffmpeg and mediasoup share the same process tree and the RTP hops over `127.0.0.
 
 | Item | Requirement |
 |---|---|
-| Sharkord | 0.0.28 (plugin SDK 2). `sdkVersion` must match the server or the plugin is not loaded |
 | ffmpeg | needs `libx264` and `libopus`. **The official image ships without ffmpeg** — the plugin downloads a static build, or you supply one; see step 2 |
 | Ports | `1935/tcp` (publishing), `40000/tcp` + `40000/udp` (Sharkord's WebRTC) |
 
